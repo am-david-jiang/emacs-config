@@ -1,5 +1,13 @@
 ;; System Configuration ----------------------------------------
 ;; 
+
+;; Network Proxy Configuration ----------------------------------------
+
+;; (setq url-proxy-services '(("http" . "192.168.229.1:7890")
+;; 			   ("https" . "192.168.229.1:7890")
+;; 			   ("no_proxy" . "^\\(localhost\\|10\\..*\\|192\\.168\\..*\\)")
+;; 			   ))
+
 ;;   Startup Performance
 
 (setq gc-cons-threshold (* 50 1000 1000))
@@ -16,27 +24,55 @@
 
 (setq native-comp-async-report-warnings-errors nil)
 
-;; Package Management ----------------------------------------
+;;   Use Elpaca as Package Manager
 
-(require 'package)
+(defvar elpaca-installer-version 0.5)
+(defvar elpaca-directory (expand-file-name "elpaca/" user-emacs-directory))
+(defvar elpaca-builds-directory (expand-file-name "builds/" elpaca-directory))
+(defvar elpaca-repos-directory (expand-file-name "repos/" elpaca-directory))
+(defvar elpaca-order '(elpaca :repo "https://github.com/progfolio/elpaca.git"
+                              :ref nil
+                              :files (:defaults (:exclude "extensions"))
+                              :build (:not elpaca--activate-package)))
+(let* ((repo  (expand-file-name "elpaca/" elpaca-repos-directory))
+       (build (expand-file-name "elpaca/" elpaca-builds-directory))
+       (order (cdr elpaca-order))
+       (default-directory repo))
+  (add-to-list 'load-path (if (file-exists-p build) build repo))
+  (unless (file-exists-p repo)
+    (make-directory repo t)
+    (when (< emacs-major-version 28) (require 'subr-x))
+    (condition-case-unless-debug err
+        (if-let ((buffer (pop-to-buffer-same-window "*elpaca-bootstrap*"))
+                 ((zerop (call-process "git" nil buffer t "clone"
+                                       (plist-get order :repo) repo)))
+                 ((zerop (call-process "git" nil buffer t "checkout"
+                                       (or (plist-get order :ref) "--"))))
+                 (emacs (concat invocation-directory invocation-name))
+                 ((zerop (call-process emacs nil buffer nil "-Q" "-L" "." "--batch"
+                                       "--eval" "(byte-recompile-directory \".\" 0 'force)")))
+                 ((require 'elpaca))
+                 ((elpaca-generate-autoloads "elpaca" repo)))
+            (progn (message "%s" (buffer-string)) (kill-buffer buffer))
+          (error "%s" (with-current-buffer buffer (buffer-string))))
+      ((error) (warn "%s" err) (delete-directory repo 'recursive))))
+  (unless (require 'elpaca-autoloads nil t)
+    (require 'elpaca)
+    (elpaca-generate-autoloads "elpaca" repo)
+    (load "./elpaca-autoloads")))
+(add-hook 'after-init-hook #'elpaca-process-queues)
+(elpaca `(,@elpaca-order))
 
-(setq package-archives '(("melpa" . "https://melpa.org/packages/")
-			 ("melpa-stable" . "https://stable.melpa.org/packages/")
-			 ("org" . "https://orgmode.org/elpa/")
-			 ("elpa" . "https://elpa.gnu.org/packages/")
-			 ("nongnu" . "https://elpa.nongnu.org/nongnu/")))
+;;    Install use-package and Enable it
 
-(package-initialize)
+(elpaca elpaca-use-package
+  ;; Enable :elpaca use-package keyword.
+  (elpaca-use-package-mode)
+  ;; Assume :elpaca t unless otherwise specified.
+  (setq elpaca-use-package-by-default t))
 
-(unless package-archive-contents
-  (package-refresh-contents))
-
-(unless (package-installed-p 'use-package)
-  (package-install 'use-package))
-
-(require 'use-package)
-
-(setq use-package-always-ensure t)
+;;    (Necessary to use the `:elpaca' use-package keyword at the top-level.)
+(elpaca-wait)
 
 ;;   Keep .emacs.d Clean
 
@@ -66,6 +102,16 @@
 
 (global-set-key (kbd "C-M-u") 'universal-argument)
 
+;; Helpful: for better help documentation
+
+(use-package helpful
+  :bind
+  ([remap describe-key] . helpful-key)
+  ([remap describe-command] . helpful-command)
+  ([remap describe-function] . helpful-callable)
+  ([remap describe-variable] . helpful-variable))
+
+  
 ;; Evil Mode
 
 (use-package undo-tree
@@ -147,19 +193,22 @@
 
 (setq ad-redefinition-action 'accept)
 
+(use-package diminish)
+
 ;; Theme Configuration ----------------------------------------
 
-(use-package doom-themes
-  :ensure t
-  :config
-  (setq doom-themes-enable-bold t
-	doom-themes-enable-italic t)
-  (load-theme 'doom-tomorrow-night t)
+;; (use-package doom-themes
+;;   :ensure t
+;;   :config
+;;   (setq doom-themes-enable-bold t
+;; 	doom-themes-enable-italic t)
+;;   (load-theme 'doom-tomorrow-night t)
 
-  (doom-themes-visual-bell-config)
-  (doom-themes-org-config))
+;;   (doom-themes-visual-bell-config)
+;;   (doom-themes-org-config))
 
-(use-package diminish)
+(use-package 'catppuccin-theme)
+(load-theme 'catppuccin :no-confirm)
 
 ;; Font Configuration ----------------------------------------
 
@@ -171,7 +220,7 @@
 
 (set-face-attribute 'variable-pitch nil
 		    :font "Cantarell-11")
-		    
+
 ;; Mode Line Configuration ----------------------------------------
 
 (use-package all-the-icons
@@ -190,11 +239,6 @@
   (setq doom-modeline-github nil)
   (setq doom-modeline-battery t)
   (setq doom-modeline-time t))
-
-;; Network Proxy Configuration ----------------------------------------
-
-;; (setq url-proxy-services '(("http" . "192.168.229.1:7890")
-;; 			                     ("https" . "192.168.229.1:7890")))
 
 ;; Workspace Configuration ----------------------------------------
 
@@ -242,9 +286,6 @@
   :hook ((text-mode . ws-butler-mode)
          (prog-mode . ws-butler-mode)))
 
-;; Set default connection mode to SSH
-(setq tramp-default-method "ssh")
-
 ;; Parinfer -- For Lispy Language
 (use-package parinfer-rust-mode
   :disabled
@@ -256,10 +297,6 @@
   (lisp-mode . parinfer-rust-mode)
   :init
   (setq parinfer-rust-auto-download t))
-
-
-(use-package origami
-  :hook (yaml-mode . origami-mode))
 
 (use-package savehist
   :config
@@ -298,69 +335,6 @@
 
 ;; Window Management Configuration ----------------------------------------
 
-;; Frame Scaling/Zooming
-
-(use-package default-text-scale
-  :defer 1
-  :config
-  (default-text-scale-mode))
-
-;; File Browsing
-
-(use-package all-the-icons-dired)
-
-;; Org Mode Configuration ----------------------------------------
-
-(setq-default fill-column 80)
-
-;; Turn on indentation and auto-fill mode for Org files
-(defun dj/org-mode-setup ()
-  (org-indent-mode)
-  (variable-pitch-mode 1)
-  (auto-fill-mode 0)
-  (visual-line-mode 1)
-  (setq evil-auto-indent nil)
-  (diminish org-indent-mode))
-
-(use-package org
-  :defer t
-  :hook (org-mode . dj/org-mode-setup)
-  :config
-  (setq org-ellipsis " ▾"
-        org-hide-emphasis-markers t
-        org-src-fontify-natively t
-        org-fontify-quote-and-verse-blocks t
-        org-src-tab-acts-natively t
-        org-edit-src-content-indentation 2
-        org-hide-block-startup nil
-        org-src-preserve-indentation nil
-        org-startup-folded 'content
-        org-cycle-separator-lines 2)
-
-  (setq org-modules
-    '(org-crypt
-        org-habit
-        org-bookmark
-        org-eshell
-        org-irc))
-
-  (setq org-refile-targets '((nil :maxlevel . 1)
-                             (org-agenda-files :maxlevel . 1)))
-
-  (setq org-outline-path-complete-in-steps nil)
-  (setq org-refile-use-outline-path t)
-
-  (evil-define-key '(normal insert visual) org-mode-map (kbd "C-j") 'org-next-visible-heading)
-  (evil-define-key '(normal insert visual) org-mode-map (kbd "C-k") 'org-previous-visible-heading)
-
-  (evil-define-key '(normal insert visual) org-mode-map (kbd "M-j") 'org-metadown)
-  (evil-define-key '(normal insert visual) org-mode-map (kbd "M-k") 'org-metaup)
-
-  (org-babel-do-load-languages
-    'org-babel-load-languages
-    '((emacs-lisp . t)
-      (ledger . t))))
-
 ;; Development Configuration ----------------------------------------
 
 ;; Git
@@ -394,14 +368,87 @@
   :bind-keymap
   ("C-c p" . projectile-command-map))
 
-;; Programming Development Configuration ----------------------------------------
+;; Tree-sitter Configuration ----------------------------------------
 
-;; 1. LSP ----------------------------------------
+(setq treesit-language-source-alist
+   '((bash "https://github.com/tree-sitter/tree-sitter-bash")
+     (cmake "https://github.com/uyha/tree-sitter-cmake")
+     (css "https://github.com/tree-sitter/tree-sitter-css")
+     (elisp "https://github.com/Wilfred/tree-sitter-elisp")
+     (go "https://github.com/tree-sitter/tree-sitter-go")
+     (html "https://github.com/tree-sitter/tree-sitter-html")
+     (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
+     (json "https://github.com/tree-sitter/tree-sitter-json")
+     (make "https://github.com/alemuller/tree-sitter-make")
+     (markdown "https://github.com/ikatyang/tree-sitter-markdown")
+     (python "https://github.com/tree-sitter/tree-sitter-python")
+     (toml "https://github.com/tree-sitter/tree-sitter-toml")
+     (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+     (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+     (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
 
-;; Eglot -- LSP Client
+;; Eglot LSP Configuration ----------------------------------------
 
-;; Company -- Completion Package
+(use-package eglot
+  :hook (prog-mode . eglot-ensure))
 
-;; 2. Programming Languages ----------------------------------------
+;; Company Package for AutoComplete ----------------------------------------
 
-;; Web Development
+(use-package company
+  :hook (eglot-connect . company-mode)
+  :config
+  (setq company-idle-delay 0))
+
+
+;; Web Development Configuration ----------------------------------------
+
+(use-package web-mode
+  :config
+  (add-to-list 'auto-mode-alist '("\\.phtml\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.tpl\\.php\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.[agj]sp\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.as[cp]x\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.erb\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.mustache\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.djhtml\\'" . web-mode)))
+
+;; Lua Mode
+
+(use-package lua-mode
+  :mode
+  ("\\.lua\\'" . lua-mode))
+
+;; Markdown Mode
+
+(use-package markdown-mode
+  :ensure t
+  :mode ("README\\.md\\'" . gfm-mode)
+  :init (setq markdown-command "multimarkdown"))
+
+;; Elpy: better Python development experience
+
+(use-package elpy
+  :ensure t
+  :init
+  (elpy-enable))
+
+;; Web-mode
+
+(use-package web-mode
+  :config
+  (add-to-list 'auto-mode-alist '("\\.phtml\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.tpl\\.php\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.[agj]sp\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.as[cp]x\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.erb\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.mustache\\'" . web-mode))
+  (add-to-list 'auto-mode-alist '("\\.djhtml\\'" . web-mode)))
+
+;; Dired-related Package
+
+(use-package all-the-icons-dired
+  :hook (dired-mode . all-the-icons-dired-mode))
+
+(use-package dired-quick-sort
+  :config
+  (dired-quick-sort-setup))
